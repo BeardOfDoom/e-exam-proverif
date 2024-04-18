@@ -1,0 +1,130 @@
+type id.
+type skey.
+type role.
+
+free C: role.
+free E: role.
+
+free tmpC: channel.
+
+free ch: channel [private].
+free mix: channel [private].
+free bb: channel.
+
+free chan: channel.
+
+free questions:bitstring[private].
+noninterf questions.
+
+fun pk(skey): id.
+fun hash(bitstring): bitstring.
+
+fun encrypt(id, bitstring): bitstring.
+fun decrypt(skey, bitstring): bitstring
+    reduc
+        forall k: skey, m: bitstring; decrypt(k, encrypt(pk(k), m)) = m.
+
+
+
+fun sign(skey, bitstring) : bitstring.
+
+reduc forall k: skey, m: bitstring; getmess(sign(k, m)) = m.
+fun checksign(id, bitstring) : bitstring
+    reduc
+        forall k: skey, m: bitstring; checksign(pk(k), sign(k, m)) = m.
+
+(*-----------------Exam Authority-----------------*)
+let EA (skEA: skey, idABCA: id, idQC: id) =
+
+    new exam: id;
+    out(bb, exam);
+    (* Request questions *)
+    out(ch, exam);
+    in(ch, (Q:bitstring, =exam));
+    let (qi: bitstring, sqi: bitstring) = Q in
+    if (qi, exam) = checksign(idQC, sqi) then
+
+    (* Examiner registration *)
+    in(mix, (CrE: bitstring, pseudoE : id, =exam));
+    let (credE: bitstring, scredE: bitstring) = CrE in
+    if (credE, E) = checksign(idABCA, scredE) then
+        out(mix, (exam, true));
+
+    (* Candidate registration *)
+    in(mix, (CrC: bitstring, pseudoC : id, =exam));
+    let (credC: bitstring, scredC: bitstring) = CrC in
+    if (credC, C) = checksign(idABCA, scredC) then
+        out(mix, (exam, true))
+    .
+
+(*-----------------Question Committee-----------------*)
+let QC (skQC : skey, qi: bitstring) =
+    in(ch, exam: id);
+    let Q = (qi, sign(skQC, (qi, exam))) in
+    out(ch, (Q, exam)).
+
+(*-----------------Examiner-----------------*)
+let Ex (pseudo_skE: skey, CrE: bitstring, idEA: id, mark: bitstring) =
+    
+    let pseudoE = pk(pseudo_skE) in
+    (* Registration *)
+    in(bb, exam: id);
+    out(mix, (CrE, pseudoE, exam));
+
+    in(mix, (=exam, isreg: bool));
+
+    if isreg = true then 0
+    .
+
+(*-----------------Candidate-----------------*)
+let Cand (pseudo_skC: skey, CrC: bitstring, idEA: id, idQC: id, ans: bitstring) =
+    
+    let pseudoC = pk(pseudo_skC) in
+    (* Registration *)
+    in(bb, exam: id);
+    out(mix, (CrC, pseudoC, exam));
+
+    in(mix, (=exam, isreg: bool));
+
+    if isreg = true then 0
+    .
+
+process
+
+!(
+    (*Write only channels for the attacker*)
+     !in(tmpC, x:bitstring); out(mix, x);
+     !in(tmpC, x:bitstring); out(ch, x);
+
+    (*There is an Attribute-based Credential Authority*)
+    new skABCA: skey; let idABCA = pk(skABCA) in out (chan, idABCA);
+
+    (*We assume one Exam Authority and one Question Committee*)
+    new skEA: skey; let idEA = pk(skEA) in out (chan, idEA);
+    new skQC: skey; let idQC = pk(skQC) in out (chan, idQC);
+
+    (!( 
+        EA(skEA, idABCA, idQC)
+    )) |
+    (!(
+        QC(skQC, questions)
+    )) |
+    (!(
+        new pseudo_skE: skey;
+        new credE: bitstring;
+        let scredE = sign(skABCA, (credE, E)) in
+        let CrE = (credE, scredE) in
+        out(chan, (pk(pseudo_skE), pseudo_skE, CrE));
+        in(chan, mark:bitstring);
+        Ex(pseudo_skE, CrE, idEA, mark)
+    )) |
+    (!( 
+        new pseudo_skC: skey;
+        new credC: bitstring;
+        let scredC = sign(skABCA, (credC, C)) in
+        let CrC = (credC, scredC) in
+        out(chan, (pk(pseudo_skC), pseudo_skC, CrC));
+        in(chan, ans:bitstring);
+        Cand(pseudo_skC, CrC, idEA, idQC, ans)
+    ))
+)
